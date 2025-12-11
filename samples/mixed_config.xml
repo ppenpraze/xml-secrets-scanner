@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Mixed Configuration - Contains both production and test secrets -->
+<application>
+    <name>MyApplication</name>
+    <version>2.0.1</version>
+
+    <!-- Production secrets -->
+    <prod_database>
+        <connectionString>EXAMPLE_SQL_CONNECTION_STRING</connectionString>
+    </prod_database>
+
+    <production_aws>
+        <region>us-east-1</region>
+        <access_key>AWS_ACCESS_KEY_ID_EXAMPLE</access_key>
+        <secret_key>AWS_SECRET_ACCESS_KEY_EXAMPLE</secret_key>
+    </production_aws>
+
+    <!-- Test secrets (should be filtered with prod-only flag) -->
+    <test_database>
+        <host>localhost</host>
+        <test_password>testdb123</test_password>
+    </test_database>
+
+    <dev_aws>
+        <dev_access_key>AWS_ACCESS_KEY_ID_TEST_EXAMPLE</dev_access_key>
+        <dev_secret_key>AWS_SECRET_ACCESS_KEY_TEST_EXAMPLE</dev_secret_key>
+    </dev_aws>
+
+    <!-- API configurations -->
+    <apis>
+        <google_maps>
+            <prod_api_key>GOOGLE_API_KEY_EXAMPLE</prod_api_key>
+            <test_api_key>GOOGLE_API_KEY_TEST_EXAMPLE</test_api_key>
+        </google_maps>
+
+        <stripe>
+            <live_publishable_key>STRIPE_PUBLIC_KEY_EXAMPLE</live_publishable_key>
+            <live_secret_key>STRIPE_SECRET_EXAMPLE</live_secret_key>
+            <test_publishable_key>STRIPE_TEST_PUBLIC_KEY_EXAMPLE</test_publishable_key>
+        </stripe>
+    </apis>
+
+    <!-- Mixed user accounts -->
+    <users>
+        <!-- Production admin -->
+        <user type="production">
+            <username>prod_sysadmin</username>
+            <password_hash>EXAMPLE_SHA512_CRYPT_HASH</password_hash>
+        </user>
+
+        <!-- Test admin -->
+        <user type="test">
+            <username>test_admin</username>
+            <test_password_hash>EXAMPLE_SHA512_CRYPT_HASH_TEST</test_password_hash>
+        </user>
+    </users>
+</application>

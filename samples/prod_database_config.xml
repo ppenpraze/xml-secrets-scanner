@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Production Database Configuration -->
+<configuration>
+    <database name="prod_primary_db">
+        <host>prod-db-01.company.com</host>
+        <port>5432</port>
+        <username>prod_admin</username>
+        <password>EXAMPLE_PASSWORD</password>
+        <connectionString>EXAMPLE_CONNECTION_STRING</connectionString>
+    </database>
+
+    <database name="prod_replica_db">
+        <host>prod-db-02.company.com</host>
+        <port>5432</port>
+        <prod_password>EXAMPLE_REPLICA_PASSWORD</prod_password>
+    </database>
+
+    <production_credentials>
+        <api_key>GOOGLE_API_KEY_EXAMPLE</api_key>
+        <secret_key>STRIPE_SECRET_EXAMPLE</secret_key>
+    </production_credentials>
+
+    <!-- Production user accounts with crypt hashes -->
+    <production_users>
+        <user name="admin">
+            <username>prod_sysadmin</username>
+            <!-- SHA-512 crypt hash -->
+            <hash>EXAMPLE_SHA512_CRYPT_HASH</hash>
+        </user>
+        <user name="dbadmin">
+            <username>prod_dbadmin</username>
+            <!-- bcrypt hash -->
+            <password_hash>EXAMPLE_BCRYPT_HASH</password_hash>
+        </user>
+    </production_users>
+
+    <live_api_endpoints>
+        <endpoint name="payment_gateway">
+            <url>https://api.payment.com/v1</url>
+            <live_api_key>STRIPE_PUBLIC_KEY_EXAMPLE</live_api_key>
+            <live_secret>STRIPE_SECRET_EXAMPLE</live_secret>
+        </endpoint>
+    </live_api_endpoints>
+</configuration>

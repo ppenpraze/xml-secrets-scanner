@@ -1,0 +1,10 @@
+# XML Secret Detector and detect-secrets Plugins
+
+# For standalone tool (no dependencies)
+# Python 3.6+ required
+
+# For detect-secrets plugins
+detect-secrets>=1.4.0
+
+# Optional for development
+# pytest>=7.0.0

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Database-specific configuration -->
+<databases>
+    <database_prod_primary>
+        <host>db-prod-01.company.com</host>
+        <port>3306</port>
+        <username>db_prod_user</username>
+        <password>MyS3cur3_DB_P@ssw0rd!</password>
+    </database_prod_primary>
+
+    <database_prod_analytics>
+        <host>db-prod-analytics.company.com</host>
+        <username>analytics_user</username>
+        <password>An@lyt1cs_S3cr3t_2024</password>
+    </database_prod_analytics>
+
+    <database_test>
+        <host>localhost</host>
+        <username>test_user</username>
+        <password>testpass123</password>
+    </database_test>
+
+    <db_backup_credentials>
+        <username>backup_user</username>
+        <password>B@ckup_P@ssw0rd_S3cur3</password>
+    </db_backup_credentials>
+</databases>

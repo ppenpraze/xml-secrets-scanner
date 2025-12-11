@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- Example XML with various types of secrets for testing -->
+
+    <!-- Plaintext passwords -->
+    <database>
+        <host>localhost</host>
+        <username>admin</username>
+        <password>SuperSecret123!</password>
+    </database>
+
+    <server name="prod-server" password="MyP@ssw0rd2024" ip="192.168.1.100"/>
+
+    <!-- Unix crypt format passwords -->
+    <users>
+        <user>
+            <name>john</name>
+            <hash>$6$rounds=5000$saltsaltsal$5B8vYYiY.CVt1RlTTf11JbZHhjAv12345678901234567890123456789012345678901234567890123456</hash>
+        </user>
+        <user>
+            <name>jane</name>
+            <hash>$1$abcdefgh$FooBarBazQuxQuux123</hash>
+        </user>
+        <user>
+            <name>bob</name>
+            <hash>$2a$12$abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUV</hash>
+        </user>
+    </users>
+
+    <!-- API Keys and tokens -->
+    <services>
+        <api name="google" api_key="AIzaSyD4W9x8K3mN7pQ2rT5vY8wZ1aB3cD4eF5g"/>
+        <api name="aws" secret="wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"/>
+        <oauth>
+            <token>ya29.A0ARrdaM8fQxZ1234567890abcdefghijklmnopqrstuvwxyzABCDEF</token>
+        </oauth>
+    </services>
+
+    <!-- Base64 encoded content -->
+    <secrets>
+        <encoded>dGhpc2lzYXNlY3JldHBhc3N3b3JkdGhhdHNob3VsZGJlZGV0ZWN0ZWQ=</encoded>
+        <key>U29tZVJhbmRvbVNlY3JldEtleVRoYXRJc0Jhc2U2NEVuY29kZWRGb3JUZXN0aW5n</key>
+    </secrets>
+
+    <!-- These should be filtered out as placeholders -->
+    <examples>
+        <example password="password" note="Should be filtered as placeholder"/>
+        <example password="changeme" note="Should be filtered as placeholder"/>
+        <example password="example" note="Should be filtered as placeholder"/>
+        <test_password>test123</test_password>
+        <sample_password>sample</sample_password>
+    </examples>
+</configuration>

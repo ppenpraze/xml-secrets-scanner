@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Multi-line XML test - nodes and values on different lines -->
+<configuration>
+    <!-- Case 1: Value on separate line -->
+    <password>
+        MySecretPassword123
+    </password>
+
+    <!-- Case 2: Multiple levels of nesting -->
+    <database>
+        <prod_password>
+            ProductionSecret2024
+        </prod_password>
+    </database>
+
+    <!-- Case 3: Value with whitespace -->
+    <api_key>
+        AIzaSyD_MultiLine_Key_12345
+    </api_key>
+
+    <!-- Case 4: Attribute on different line (still same line for parser) -->
+    <server
+        name="prod-server"
+        password="ServerPassword123"
+        ip="192.168.1.100"/>
+
+    <!-- Case 5: CDATA block -->
+    <secret><![CDATA[
+        SecretInCDATA
+    ]]></secret>
+
+    <!-- Case 6: Mixed content -->
+    <prod_config>
+        <name>Production Database</name>
+        <connection_string>
+            Server=prod-db.company.com;Password=MultiLineDBPassword2024;
+        </connection_string>
+    </prod_config>
+
+    <!-- Case 7: Multiple lines with formatting -->
+    <production_api_key>
+        pk_live_VeryLongProductionAPIKey
+        ThatSpansMultipleLinesForReadability
+    </production_api_key>
+</configuration>

@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Test/Development Database Configuration - Should be filtered out with prod-only flag -->
+<configuration>
+    <database name="test_primary_db">
+        <host>localhost</host>
+        <port>5432</port>
+        <username>test_user</username>
+        <password>test123</password>
+        <test_password>testpassword</test_password>
+    </database>
+
+    <dev_database>
+        <host>dev-db.internal</host>
+        <dev_password>dev_secret_123</dev_password>
+        <dev_api_key>dev_key_abc123xyz</dev_api_key>
+    </dev_database>
+
+    <example_config>
+        <example_password>example123</example_password>
+        <sample_password>sample</sample_password>
+    </example_config>
+
+    <!-- These should be filtered as placeholders -->
+    <defaults>
+        <password>password</password>
+        <password>changeme</password>
+        <api_key>your_api_key_here</api_key>
+    </defaults>
+
+    <test_users>
+        <user name="testuser1">
+            <username>test_admin</username>
+            <!-- This is a real hash but in test data -->
+            <hash>$6$testsalt$abcdefghijklmnopqrstuvwxyz1234567890ABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890abcdef</hash>
+        </user>
+    </test_users>
+</configuration>
