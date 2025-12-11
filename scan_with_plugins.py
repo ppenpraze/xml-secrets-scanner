@@ -28,6 +28,7 @@ import sys
 from pathlib import Path
 from typing import List, Dict, Any
 from xml_plugins import XMLPasswordPlugin, UnixCryptPlugin
+from utils.encoding import read_text_safely
 
 
 def scan_file(file_path: str, xml_plugin: XMLPasswordPlugin, unix_plugin: UnixCryptPlugin) -> List[Dict[str, Any]]:
@@ -35,27 +36,28 @@ def scan_file(file_path: str, xml_plugin: XMLPasswordPlugin, unix_plugin: UnixCr
     results = []
 
     try:
-        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-            for line_num, line in enumerate(f, 1):
-                # Check with XML password plugin
-                for secret in xml_plugin.analyze_line(str(file_path), line, line_num):
-                    results.append({
-                        'file': str(file_path),
-                        'line_number': line_num,
-                        'type': secret.type,
-                        'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                        'line_content': line.strip()
-                    })
+        # Read using robust encoding to avoid UnicodeDecodeError
+        content = read_text_safely(file_path)
+        for line_num, line in enumerate(content.splitlines(True), 1):
+            # Check with XML password plugin
+            for secret in xml_plugin.analyze_line(str(file_path), line, line_num):
+                results.append({
+                    'file': str(file_path),
+                    'line_number': line_num,
+                    'type': secret.type,
+                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                    'line_content': line.strip()
+                })
 
-                # Check with Unix crypt plugin
-                for secret in unix_plugin.analyze_line(str(file_path), line, line_num):
-                    results.append({
-                        'file': str(file_path),
-                        'line_number': line_num,
-                        'type': secret.type,
-                        'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                        'line_content': line.strip()
-                    })
+            # Check with Unix crypt plugin
+            for secret in unix_plugin.analyze_line(str(file_path), line, line_num):
+                results.append({
+                    'file': str(file_path),
+                    'line_number': line_num,
+                    'type': secret.type,
+                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                    'line_content': line.strip()
+                })
     except Exception as e:
         print(f"Error scanning {file_path}: {e}", file=sys.stderr)
 

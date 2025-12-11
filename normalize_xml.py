@@ -17,6 +17,7 @@ import sys
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Optional
+from utils.encoding import read_text_safely
 
 
 def normalize_xml_content(xml_content: str) -> str:
@@ -110,9 +111,8 @@ def normalize_xml_file(input_file: str, output_file: Optional[str] = None,
         output_path = Path(output_file)
 
     try:
-        # Read original XML
-        with open(input_path, 'r', encoding='utf-8') as f:
-            xml_content = f.read()
+        # Read original XML with robust encoding handling
+        xml_content = read_text_safely(str(input_path))
 
         # Check for XML declaration
         has_declaration = xml_content.strip().startswith('<?xml')

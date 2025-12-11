@@ -17,6 +17,7 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from xml_plugins import XMLPasswordPlugin, UnixCryptPlugin
+from utils.encoding import read_text_safely
 from normalize_xml import normalize_xml_content
 
 
@@ -152,9 +153,8 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
         List of detected secrets with context
     """
     try:
-        # Read XML content
-        with open(file_path, 'r', encoding='utf-8') as f:
-            xml_content = f.read()
+        # Read XML content with robust encoding handling
+        xml_content = read_text_safely(file_path)
 
         # Normalize if requested
         if normalize:

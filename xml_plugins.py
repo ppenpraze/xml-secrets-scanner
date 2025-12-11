@@ -276,12 +276,13 @@ class UnixCryptPlugin(RegexBasedDetector):
 
     def __init__(
         self,
-        detect_des: bool = True,
+        detect_des: bool = False,
         detect_md5: bool = True,
         detect_bcrypt: bool = True,
         detect_sha256: bool = True,
         detect_sha512: bool = True,
         detect_yescrypt: bool = True,
+        require_des_context: bool = True,
         **kwargs
     ):
         self.detect_des = detect_des
@@ -290,6 +291,7 @@ class UnixCryptPlugin(RegexBasedDetector):
         self.detect_sha256 = detect_sha256
         self.detect_sha512 = detect_sha512
         self.detect_yescrypt = detect_yescrypt
+        self.require_des_context = require_des_context
 
         super().__init__(**kwargs)
 
@@ -327,16 +329,18 @@ class UnixCryptPlugin(RegexBasedDetector):
             )
 
         if self.detect_yescrypt:
-            # yescrypt: $y$ or $7$
+            # yescrypt: $y$ or legacy $7$ with multiple segments. To reduce FPs,
+            # enforce that the final segment (encoded hash) is reasonably long.
+            # Example: $y$...$<hash>
             patterns.append(
-                re.compile(r'\$[y7]\$[a-zA-Z0-9./]+\$[a-zA-Z0-9./]+')
+                re.compile(r'\$(?:y|7)\$[^\s$]+\$[a-zA-Z0-9./]{32,}')
             )
 
         if self.detect_des:
-            # Traditional DES: 13 characters from [a-zA-Z0-9./]
-            # Be more strict to avoid false positives - look for word boundaries
+            # Traditional DES: exactly 13 chars from [a-zA-Z0-9./], with strict
+            # token boundaries (not part of a longer string). Use lookarounds.
             patterns.append(
-                re.compile(r'(?:^|["\'\s>:=])[a-zA-Z0-9./]{13}(?:["\'\s<:,]|$)')
+                re.compile(r'(?<![A-Za-z0-9./])[A-Za-z0-9./]{13}(?![A-Za-z0-9./])')
             )
 
         return patterns
@@ -362,6 +366,10 @@ class UnixCryptPlugin(RegexBasedDetector):
 
                 # Additional validation for DES hashes to reduce false positives
                 if len(secret) == 13 and self.detect_des:
+                    # Require context words if configured
+                    if self.require_des_context:
+                        if not re.search(r'(?i)\b(crypt|hash|passwd|password|shadow)\b', line):
+                            continue
                     # DES hashes should have some variety in characters
                     if len(set(secret)) < 8:  # At least 8 unique characters
                         continue
