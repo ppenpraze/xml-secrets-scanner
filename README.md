@@ -37,18 +37,20 @@ python3 scan_xml_with_context.py /path/to/repo --prod-only --output prod-secrets
 python3 scan_with_plugins.py /path/to/repo --output results.json
 ```
 
-**Note:** Use `scan_xml_with_context.py` for comprehensive scanning that handles multi-line XML and includes parent element context. See [MULTILINE_XML_GUIDE.md](MULTILINE_XML_GUIDE.md) for details.
+**Note:** Use `scan_xml_with_context.py` for comprehensive scanning that handles multi-line XML and includes parent element context. It attempts to parse as XML first for any file and falls back to safe line-by-line scanning if parsing fails. In directory mode, it scans `.xml`, `.config`, `.conf`, `.properties`, `.yaml`, `.yml`, `.ini`, `.cfg` by default. See [MULTILINE_XML_GUIDE.md](MULTILINE_XML_GUIDE.md) for details.
 
 ## Features
 
 ### XMLPasswordPlugin
 
-Detects passwords and secrets in XML files with configurable filtering.
+Detects passwords and secrets in XML files with configurable filtering. Also supports common non-XML key/value formats (e.g., `key=value`, `key: value`) for plaintext and encryption material.
 
 **What it detects:**
 - XML attributes: `password="secret"`, `api_key="..."`, `auth_token="..."`
 - XML elements: `<password>secret</password>`, `<apiKey>...</apiKey>`
+- Plaintext secrets in non-XML files via `key=value` or `key: value`
 - API keys, secrets, connection strings, private keys
+- AES/encryption keys (heuristics for 128/192/256-bit hex or base64), e.g., `aes_key`, `encryption_key`, `cipher_key`
 
 **Filtering options:**
 - `include_entities`: Regex patterns for XML entities to INCLUDE (e.g., `prod_.*`)
@@ -75,12 +77,20 @@ with open('config.xml') as f:
             print(f"Line {line_num}: {secret.secret_value}")
 ```
 
+Non-XML key/value example (properties/conf):
+```python
+plugin = XMLPasswordPlugin()
+line = 'encryption_key = zXJx3L8m7Y1+8eUqJ2y8Ww=='
+for s in plugin.analyze_line('app.properties', line, 1):
+    print(s.secret_value)
+```
+
 ### UnixCryptPlugin
 
 Detects Unix crypt format password hashes.
 
 **Supported formats:**
-- Traditional DES (13 characters)
+- Traditional DES (13 characters) [disabled by default to reduce false positives; enable with `detect_des=True`]
 - MD5: `$1$salt$hash`
 - bcrypt: `$2a$`, `$2b$`, `$2x$`, `$2y$`
 - SHA-256: `$5$salt$hash`
@@ -99,6 +109,9 @@ plugin = UnixCryptPlugin(
     detect_sha256=False,
     detect_sha512=True
 )
+
+# If you need legacy DES as well (may increase false positives):
+plugin_des = UnixCryptPlugin(detect_des=True)
 ```
 
 ## Installation
@@ -394,6 +407,23 @@ Expected output:
 Install with:
 ```bash
 pip install -e .
+```
+
+## Scanning non-XML files and custom extensions
+
+Single files are always attempted as XML first and fall back to line-by-line scanning on parse errors, regardless of extension. In directory scans, you can adjust extensions:
+
+```bash
+# Use default extended set (xml, config, conf, properties, yaml/yml, ini, cfg)
+python3 scan_xml_with_context.py /path/to/repo --output results.json
+
+# Add more extensions explicitly
+python3 scan_xml_with_context.py /path/to/repo \
+  --extensions .xml .config .conf .properties .yaml .yml .ini .cfg .txt \
+  --output results.json
+
+# Scan a single arbitrary file (XML-first, then fallback)
+python3 scan_xml_with_context.py /etc/app.conf --output app-conf.json
 ```
 
 ## License

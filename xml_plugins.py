@@ -58,6 +58,12 @@ class XMLPasswordPlugin(RegexBasedDetector):
             'access_token', 'accesstoken', 'access-token',
             'private_key', 'privatekey', 'private-key',
             'client_secret', 'clientsecret', 'client-secret',
+            # encryption / AES related
+            'aes_key', 'aeskey', 'aes-key',
+            'encryption_key', 'encryptionkey', 'encryption-key',
+            'crypto_key', 'cryptokey', 'crypto-key',
+            'cipher_key', 'cipherkey', 'cipher-key',
+            'keystore_password', 'keystore_pass', 'keystorepass',
         ]
 
         # Default patterns for common secret-like elements
@@ -69,6 +75,10 @@ class XMLPasswordPlugin(RegexBasedDetector):
             'privateKey', 'private_key', 'private-key',
             'clientSecret', 'client_secret', 'client-secret',
             'connectionString', 'connection_string', 'connection-string',
+            # encryption / AES related
+            'aesKey', 'aes_key', 'encryptionKey', 'encryption_key',
+            'cryptoKey', 'crypto_key', 'cipherKey', 'cipher_key',
+            'keystorePassword', 'keystore_password',
         ]
 
         # Placeholder values to ignore
@@ -156,6 +166,26 @@ class XMLPasswordPlugin(RegexBasedDetector):
 
         return False
 
+    def _looks_like_base64(self, s: str) -> bool:
+        return bool(re.fullmatch(r'[A-Za-z0-9+/=]+', s)) and len(s) % 4 == 0
+
+    def _looks_like_hex(self, s: str) -> bool:
+        return bool(re.fullmatch(r'[0-9A-Fa-f]+', s))
+
+    def _looks_like_aes_key(self, value: str) -> bool:
+        """Heuristic: AES keys are commonly 128/192/256-bit.
+        - Hex lengths: 32, 48, 64
+        - Base64 lengths (unpadded typical): 24, 32, 44 (may include '=')
+        """
+        v = value.strip().replace(' ', '')
+        # Hex
+        if self._looks_like_hex(v) and len(v) in (32, 48, 64):
+            return True
+        # Base64 (ignore minor punctuation at ends)
+        if self._looks_like_base64(v) and len(v) in (24, 32, 44):
+            return True
+        return False
+
     def analyze_line(
         self,
         filename: str,
@@ -232,6 +262,40 @@ class XMLPasswordPlugin(RegexBasedDetector):
                 type=self.secret_type,
                 filename=filename,
                 secret=element_value,
+                line_number=line_number,
+            )
+
+        # Pattern 3: key[:=]value style in non-XML files (properties, conf, yaml-ish)
+        # Examples: password=foo, encryption_key: "...", aes_key: AbCd==
+        kv_pattern = re.compile(r'(\b[\w\.-]+)\s*[:=]\s*(["\"])?.*?\2')
+        # A more controlled capture to get the value without trailing comments
+        kv_iter = re.finditer(r'(\b[\w\.-]+)\s*[:=]\s*(["\"])?(.*?)\2(?:\s*[#;].*)?$', line)
+        for m in kv_iter:
+            key = m.group(1)
+            val = (m.group(3) or '').strip()
+            if not val:
+                continue
+
+            # Decide if key should be considered (reuse attribute logic)
+            if not self._should_include_attribute(key):
+                # If not in default list, also allow AES/encryption named keys heuristically
+                lowered = key.lower()
+                aes_like = any(x in lowered for x in (
+                    'aes', 'encrypt', 'crypto', 'cipher', 'keystore'
+                ))
+                if not aes_like:
+                    continue
+
+            # Validate value
+            if not self._is_valid_secret(val):
+                # Special-case AES/encryption keys: allow shorter values if they look like AES material
+                if not self._looks_like_aes_key(val):
+                    continue
+
+            yield PotentialSecret(
+                type=self.secret_type,
+                filename=filename,
+                secret=val,
                 line_number=line_number,
             )
 

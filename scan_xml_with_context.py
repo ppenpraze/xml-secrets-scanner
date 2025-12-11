@@ -252,7 +252,8 @@ def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
         List of all detected secrets
     """
     if extensions is None:
-        extensions = ['.xml', '.config']
+        # Broaden defaults to include common config formats in addition to XML
+        extensions = ['.xml', '.config', '.conf', '.properties', '.yaml', '.yml', '.ini', '.cfg']
 
     path = Path(directory)
     if not path.exists():
