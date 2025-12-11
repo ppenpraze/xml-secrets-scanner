@@ -89,16 +89,17 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
             })
 
         # Check with Unix crypt plugin
-        for secret in unix_plugin.analyze_line(filename, line_content, 0):
-            results.append({
-                'file': filename,
-                'element_path': current_path,
-                'parent_element': element.tag,
-                'type': secret.type,
-                'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                'line_content': line_content,
-                'detection_method': 'element_value'
-            })
+        if unix_plugin is not None:
+            for secret in unix_plugin.analyze_line(filename, line_content, 0):
+                results.append({
+                    'file': filename,
+                    'element_path': current_path,
+                    'parent_element': element.tag,
+                    'type': secret.type,
+                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                    'line_content': line_content,
+                    'detection_method': 'element_value'
+                })
 
     # Check attributes
     for attr_name, attr_value in element.attrib.items():
@@ -119,17 +120,18 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
                 })
 
             # Check with Unix crypt plugin
-            for secret in unix_plugin.analyze_line(filename, line_content, 0):
-                results.append({
-                    'file': filename,
-                    'element_path': current_path,
-                    'parent_element': element.tag,
-                    'attribute_name': attr_name,
-                    'type': secret.type,
-                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                    'line_content': line_content,
-                    'detection_method': 'attribute'
-                })
+            if unix_plugin is not None:
+                for secret in unix_plugin.analyze_line(filename, line_content, 0):
+                    results.append({
+                        'file': filename,
+                        'element_path': current_path,
+                        'parent_element': element.tag,
+                        'attribute_name': attr_name,
+                        'type': secret.type,
+                        'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                        'line_content': line_content,
+                        'detection_method': 'attribute'
+                    })
 
     # Recursively scan children
     for child in element:
@@ -139,7 +141,8 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
 
 
 def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
-                  unix_plugin: UnixCryptPlugin, normalize: bool = True) -> List[Dict[str, Any]]:
+                  unix_plugin: UnixCryptPlugin, normalize: bool = True,
+                  ns_recovery: bool = True) -> List[Dict[str, Any]]:
     """
     Scan an XML file for secrets with full context.
 
@@ -152,33 +155,89 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
     Returns:
         List of detected secrets with context
     """
+    def _line_fallback(raw_text: str) -> List[Dict[str, Any]]:
+        # Perform a line-based scan so we still catch visible secrets
+        results_fb: List[Dict[str, Any]] = []
+        for ln, line in enumerate(raw_text.splitlines(True), 1):
+            for secret in xml_plugin.analyze_line(str(file_path), line, ln):
+                results_fb.append({
+                    'file': str(file_path),
+                    'line_number': ln,
+                    'type': secret.type,
+                    'secret': getattr(secret, 'secret_value', '***'),
+                    'line_content': line.rstrip('\n'),
+                    'detection_method': 'line_fallback'
+                })
+            if unix_plugin is not None:
+                for secret in unix_plugin.analyze_line(str(file_path), line, ln):
+                    results_fb.append({
+                        'file': str(file_path),
+                        'line_number': ln,
+                        'type': secret.type,
+                        'secret': getattr(secret, 'secret_value', '***'),
+                        'line_content': line.rstrip('\n'),
+                        'detection_method': 'line_fallback'
+                    })
+        return results_fb
+
+    def _sanitize_unbound_prefixes(text: str) -> str:
+        """Remove unknown XML namespace prefixes to avoid ET 'unbound prefix' errors.
+
+        This is a best-effort sanitizer: it strips 'prefix:' from element and attribute
+        names, e.g., '<a:Tag xlink:href="...">' -> '<Tag href="...">'.
+        """
+        import re as _re
+        # Strip prefixes in element tags
+        s = _re.sub(r'<(/?)([A-Za-z_][\w\.-]*):', r'<\1', text)
+        # Strip prefixes in attributes: ' prefix:name=' -> ' name='
+        s = _re.sub(r'([\s<])([A-Za-z_][\w\.-]*):([A-Za-z_][\w\.-]*)=', r'\1\3=', s)
+        return s
+
     try:
         # Read XML content with robust encoding handling
-        xml_content = read_text_safely(file_path)
+        original_content = read_text_safely(file_path)
 
-        # Normalize if requested
-        if normalize:
-            xml_content = normalize_xml_content(xml_content)
+        # Normalize if requested (gracefully degrades to original on parse errors inside)
+        xml_content = normalize_xml_content(original_content) if normalize else original_content
 
-        # Parse XML
-        root = ET.fromstring(xml_content)
+        try:
+            # First attempt to parse
+            root = ET.fromstring(xml_content)
+        except ET.ParseError as e:
+            msg = str(e)
+            # Attempt namespace prefix recovery if specifically unbound prefixes
+            if ns_recovery and ('unbound prefix' in msg or 'undefined prefix' in msg):
+                try:
+                    recovered = _sanitize_unbound_prefixes(xml_content)
+                    root = ET.fromstring(recovered)
+                    xml_content = recovered
+                    print(f"Info: Applied namespace prefix recovery for {file_path}", file=sys.stderr)
+                except ET.ParseError:
+                    # If still failing, fall back to line-based scanning
+                    print(f"Warning: Namespace recovery failed for {file_path}; using line fallback", file=sys.stderr)
+                    return _line_fallback(original_content)
+            else:
+                # Non-namespace parse error: fall back to line scan
+                print(f"Warning: Parse error for {file_path}: {e}; using line fallback", file=sys.stderr)
+                return _line_fallback(original_content)
 
         # Scan the XML tree
         results = scan_xml_element(root, "", xml_plugin, unix_plugin, file_path)
-
         return results
 
-    except ET.ParseError as e:
-        print(f"Error parsing {file_path}: {e}", file=sys.stderr)
-        return []
     except Exception as e:
         print(f"Error scanning {file_path}: {e}", file=sys.stderr)
-        return []
+        # Ultimate fallback to line scan on unexpected errors
+        try:
+            raw = read_text_safely(file_path)
+            return _line_fallback(raw)
+        except Exception:
+            return []
 
 
 def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
                    unix_plugin: UnixCryptPlugin, extensions: List[str] = None,
-                   normalize: bool = True) -> List[Dict[str, Any]]:
+                   normalize: bool = True, ns_recovery: bool = True) -> List[Dict[str, Any]]:
     """
     Scan a directory for secrets in XML files.
 
@@ -215,7 +274,7 @@ def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
     for file_path in path.rglob('*'):
         if file_path.is_file() and file_path.suffix in extensions:
             file_count += 1
-            results = scan_xml_file(str(file_path), xml_plugin, unix_plugin, normalize)
+            results = scan_xml_file(str(file_path), xml_plugin, unix_plugin, normalize, ns_recovery)
             all_results.extend(results)
 
             if results:
