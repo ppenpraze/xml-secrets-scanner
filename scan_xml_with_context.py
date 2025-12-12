@@ -16,7 +16,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from xml_plugins import XMLPasswordPlugin, UnixCryptPlugin
+from plugin_manager import PluginManager
 from utils.encoding import read_text_safely
 from normalize_xml import normalize_xml_content
 
@@ -53,16 +53,15 @@ def get_element_path(element, root) -> str:
     return "/" + "/".join(path_parts)
 
 
-def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
-                     unix_plugin: UnixCryptPlugin, filename: str) -> List[Dict[str, Any]]:
+def scan_xml_element(element, parent_path: str, plugin_manager: PluginManager,
+                     filename: str) -> List[Dict[str, Any]]:
     """
     Scan an XML element and its children for secrets.
 
     Args:
         element: XML element to scan
         parent_path: Path to parent element
-        xml_plugin: XMLPasswordPlugin instance
-        unix_plugin: UnixCryptPlugin instance
+        plugin_manager: PluginManager instance
         filename: Source filename
 
     Returns:
@@ -76,27 +75,18 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
         text = element.text.strip()
         line_content = f"<{element.tag}>{text}</{element.tag}>"
 
-        # Check with XML password plugin
-        for secret in xml_plugin.analyze_line(filename, line_content, 0):
-            results.append({
-                'file': filename,
-                'element_path': current_path,
-                'parent_element': element.tag,
-                'type': secret.type,
-                'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                'line_content': line_content,
-                'detection_method': 'element_value'
-            })
+        # Scan with all enabled plugins
+        for secret in plugin_manager.scan_line(filename, line_content, 0):
+            # Only include if secret value exists and is not empty
+            secret_value = secret.secret_value if hasattr(secret, 'secret_value') else None
 
-        # Check with Unix crypt plugin
-        if unix_plugin is not None:
-            for secret in unix_plugin.analyze_line(filename, line_content, 0):
+            if secret_value:
                 results.append({
                     'file': filename,
                     'element_path': current_path,
                     'parent_element': element.tag,
                     'type': secret.type,
-                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                    'secret': secret_value,
                     'line_content': line_content,
                     'detection_method': 'element_value'
                 })
@@ -106,42 +96,31 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
         if attr_value:
             line_content = f'{attr_name}="{attr_value}"'
 
-            # Check with XML password plugin
-            for secret in xml_plugin.analyze_line(filename, line_content, 0):
-                results.append({
-                    'file': filename,
-                    'element_path': current_path,
-                    'parent_element': element.tag,
-                    'attribute_name': attr_name,
-                    'type': secret.type,
-                    'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
-                    'line_content': line_content,
-                    'detection_method': 'attribute'
-                })
+            # Scan with all enabled plugins
+            for secret in plugin_manager.scan_line(filename, line_content, 0):
+                # Only include if secret value exists and is not empty
+                secret_value = secret.secret_value if hasattr(secret, 'secret_value') else None
 
-            # Check with Unix crypt plugin
-            if unix_plugin is not None:
-                for secret in unix_plugin.analyze_line(filename, line_content, 0):
+                if secret_value:
                     results.append({
                         'file': filename,
                         'element_path': current_path,
                         'parent_element': element.tag,
                         'attribute_name': attr_name,
                         'type': secret.type,
-                        'secret': secret.secret_value if hasattr(secret, 'secret_value') else '***',
+                        'secret': secret_value,
                         'line_content': line_content,
                         'detection_method': 'attribute'
                     })
 
     # Recursively scan children
     for child in element:
-        results.extend(scan_xml_element(child, current_path, xml_plugin, unix_plugin, filename))
+        results.extend(scan_xml_element(child, current_path, plugin_manager, filename))
 
     return results
 
 
-def scan_original_xml(file_path: str, xml_plugin: XMLPasswordPlugin,
-                      unix_plugin: UnixCryptPlugin) -> List[Dict[str, Any]]:
+def scan_original_xml(file_path: str, plugin_manager: PluginManager) -> List[Dict[str, Any]]:
     """
     Line-based scan of original XML file (before normalization).
 
@@ -149,8 +128,7 @@ def scan_original_xml(file_path: str, xml_plugin: XMLPasswordPlugin,
 
     Args:
         file_path: Path to XML file
-        xml_plugin: XMLPasswordPlugin instance
-        unix_plugin: UnixCryptPlugin instance
+        plugin_manager: PluginManager instance
 
     Returns:
         List of detected secrets with original line numbers
@@ -161,25 +139,17 @@ def scan_original_xml(file_path: str, xml_plugin: XMLPasswordPlugin,
         content = read_text_safely(file_path)
 
         for line_num, line in enumerate(content.splitlines(), 1):
-            # Check with XML password plugin
-            for secret in xml_plugin.analyze_line(str(file_path), line, line_num):
-                results.append({
-                    'file': str(file_path),
-                    'line_number': line_num,
-                    'type': secret.type,
-                    'secret': getattr(secret, 'secret_value', '***'),
-                    'line_content': line.strip(),
-                    'detection_method': 'original_scan'
-                })
+            # Scan with all enabled plugins
+            for secret in plugin_manager.scan_line(str(file_path), line, line_num):
+                # Only include if secret value exists and is not empty
+                secret_value = secret.secret_value if hasattr(secret, 'secret_value') else None
 
-            # Check with Unix crypt plugin
-            if unix_plugin is not None:
-                for secret in unix_plugin.analyze_line(str(file_path), line, line_num):
+                if secret_value:
                     results.append({
                         'file': str(file_path),
                         'line_number': line_num,
                         'type': secret.type,
-                        'secret': getattr(secret, 'secret_value', '***'),
+                        'secret': secret_value,
                         'line_content': line.strip(),
                         'detection_method': 'original_scan'
                     })
@@ -190,9 +160,8 @@ def scan_original_xml(file_path: str, xml_plugin: XMLPasswordPlugin,
     return results
 
 
-def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
-                  unix_plugin: UnixCryptPlugin, normalize: bool = True,
-                  ns_recovery: bool = True) -> List[Dict[str, Any]]:
+def scan_xml_file(file_path: str, plugin_manager: PluginManager,
+                  normalize: bool = True, ns_recovery: bool = True) -> List[Dict[str, Any]]:
     """
     Scan an XML file for secrets with full context using DUAL SCAN approach.
 
@@ -204,8 +173,7 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
 
     Args:
         file_path: Path to XML file
-        xml_plugin: XMLPasswordPlugin instance
-        unix_plugin: UnixCryptPlugin instance
+        plugin_manager: PluginManager instance
         normalize: Whether to normalize XML first
 
     Returns:
@@ -215,22 +183,16 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
         # Perform a line-based scan so we still catch visible secrets
         results_fb: List[Dict[str, Any]] = []
         for ln, line in enumerate(raw_text.splitlines(True), 1):
-            for secret in xml_plugin.analyze_line(str(file_path), line, ln):
-                results_fb.append({
-                    'file': str(file_path),
-                    'line_number': ln,
-                    'type': secret.type,
-                    'secret': getattr(secret, 'secret_value', '***'),
-                    'line_content': line.rstrip('\n'),
-                    'detection_method': 'line_fallback'
-                })
-            if unix_plugin is not None:
-                for secret in unix_plugin.analyze_line(str(file_path), line, ln):
+            for secret in plugin_manager.scan_line(str(file_path), line, ln):
+                # Only include if secret value exists and is not empty
+                secret_value = secret.secret_value if hasattr(secret, 'secret_value') else None
+
+                if secret_value:
                     results_fb.append({
                         'file': str(file_path),
                         'line_number': ln,
                         'type': secret.type,
-                        'secret': getattr(secret, 'secret_value', '***'),
+                        'secret': secret_value,
                         'line_content': line.rstrip('\n'),
                         'detection_method': 'line_fallback'
                     })
@@ -354,7 +316,7 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
         original_content = read_text_safely(file_path)
 
         # SCAN 1: Original file (line-based) - captures line numbers
-        original_results = scan_original_xml(file_path, xml_plugin, unix_plugin)
+        original_results = scan_original_xml(file_path, plugin_manager)
 
         # SCAN 2: Normalized file (XML-parsed) - captures element paths and multi-line secrets
         normalized_results = []
@@ -386,7 +348,7 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
                         return original_results
 
                 # Scan the normalized XML tree
-                normalized_results = scan_xml_element(root, "", xml_plugin, unix_plugin, file_path)
+                normalized_results = scan_xml_element(root, "", plugin_manager, file_path)
 
             except Exception as e:
                 print(f"Error in normalized scan of {file_path}: {e}; using original scan only", file=sys.stderr)
@@ -406,16 +368,15 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
             return []
 
 
-def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
-                   unix_plugin: UnixCryptPlugin, extensions: List[str] = None,
-                   normalize: bool = True, ns_recovery: bool = True) -> List[Dict[str, Any]]:
+def scan_directory(directory: str, plugin_manager: PluginManager,
+                   extensions: List[str] = None, normalize: bool = True,
+                   ns_recovery: bool = True) -> List[Dict[str, Any]]:
     """
     Scan a directory for secrets in XML files.
 
     Args:
         directory: Directory path
-        xml_plugin: XMLPasswordPlugin instance
-        unix_plugin: UnixCryptPlugin instance
+        plugin_manager: PluginManager instance
         extensions: File extensions to scan
         normalize: Whether to normalize XML first
 
@@ -439,6 +400,7 @@ def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
     file_count = 0
 
     print(f"Scanning directory: {directory}")
+    print(f"Enabled plugins: {', '.join(plugin_manager.get_enabled_plugins())}")
     print(f"Normalization: {'enabled' if normalize else 'disabled'}")
     print(f"File extensions: {', '.join(extensions)}")
     print()
@@ -446,13 +408,13 @@ def scan_directory(directory: str, xml_plugin: XMLPasswordPlugin,
     for file_path in path.rglob('*'):
         if file_path.is_file() and file_path.suffix in extensions:
             file_count += 1
-            results = scan_xml_file(str(file_path), xml_plugin, unix_plugin, normalize, ns_recovery)
+            results = scan_xml_file(str(file_path), plugin_manager, normalize, ns_recovery)
             all_results.extend(results)
 
             if results:
                 print(f"Found {len(results)} secret(s) in: {file_path}")
 
-    print(f"\nScanned {file_count} files")
+    print(f"\nScanned {file_count} files with {plugin_manager.get_plugin_count()} plugins")
     return all_results
 
 
@@ -471,6 +433,15 @@ Examples:
   # Without normalization (faster, but may miss multi-line values)
   %(prog)s /path/to/repo --no-normalize --output results.json
 
+  # List available plugins
+  %(prog)s --list-plugins
+
+  # Enable only specific plugins
+  %(prog)s /path/to/repo --only xml_password,aws,private_key
+
+  # Disable specific plugins
+  %(prog)s /path/to/repo --disable stripe,discord,telegram
+
   # Custom filtering
   %(prog)s /path/to/repo \
     --include-entities "database_.*" "api_.*" \
@@ -479,10 +450,20 @@ Examples:
         """
     )
 
-    parser.add_argument('path', help='File or directory to scan')
+    parser.add_argument('path', nargs='?', help='File or directory to scan')
     parser.add_argument('--output', '-o', help='Output file (JSON format)')
     parser.add_argument('--extensions', '-e', nargs='+',
                        help='File extensions to scan (default: .xml .config)')
+
+    # Plugin control
+    parser.add_argument('--list-plugins', action='store_true',
+                       help='List all available plugins and exit')
+    parser.add_argument('--only',
+                       help='Enable only these plugins (comma-separated)')
+    parser.add_argument('--disable',
+                       help='Disable these plugins (comma-separated)')
+
+    # XML plugin specific options
     parser.add_argument('--include-entities', nargs='+',
                        help='Include only these entity patterns (regex)')
     parser.add_argument('--exclude-entities', nargs='+',
@@ -493,8 +474,12 @@ Examples:
                        help='Exclude these attribute patterns (regex)')
     parser.add_argument('--min-length', type=int, default=4,
                        help='Minimum password length (default: 4)')
+    parser.add_argument('--ignore-values', nargs='+',
+                       help='Additional values to ignore as false positives (e.g., "myapp" "config123")')
     parser.add_argument('--prod-only', action='store_true',
                        help='Scan production secrets only')
+
+    # Scanning options
     parser.add_argument('--no-normalize', action='store_true',
                        help='Skip XML normalization (faster but may miss multi-line)')
     parser.add_argument('--disable-unix-crypt', action='store_true',
@@ -502,39 +487,81 @@ Examples:
 
     args = parser.parse_args()
 
-    # Configure plugins
-    if args.prod_only:
-        xml_plugin = XMLPasswordPlugin(
-            include_entities=['prod_.*', 'production_.*', 'live_.*'],
-            exclude_entities=['test_.*', 'dev_.*', 'development_.*', 'example_.*', 'sample_.*', 'demo_.*'],
-            min_password_length=6
-        )
-    else:
-        xml_plugin = XMLPasswordPlugin(
-            include_entities=args.include_entities,
-            exclude_entities=args.exclude_entities,
-            include_attributes=args.include_attributes,
-            exclude_attributes=args.exclude_attributes,
-            min_password_length=args.min_length
-        )
+    # Handle --list-plugins
+    if args.list_plugins:
+        print("Available Plugins:")
+        print("=" * 80)
+        for plugin_info in PluginManager.list_available_plugins():
+            enabled = "✓" if plugin_info['enabled_default'] else " "
+            print(f"  [{enabled}] {plugin_info['name']:20s} - {plugin_info['description']}")
+        print("\n" + "=" * 80)
+        print("✓ = Enabled by default")
+        print("\nUse --only or --disable to control which plugins run")
+        return 0
 
-    unix_plugin = UnixCryptPlugin() if not args.disable_unix_crypt else None
+    # Require path if not listing plugins
+    if not args.path:
+        parser.error("path is required (unless using --list-plugins)")
+
+    # Parse plugin control options
+    enabled_plugins = None
+    disabled_plugins = []
+
+    if args.only:
+        enabled_plugins = [p.strip() for p in args.only.split(',')]
+
+    if args.disable:
+        disabled_plugins = [p.strip() for p in args.disable.split(',')]
+
+    if args.disable_unix_crypt:
+        disabled_plugins.append('unix_crypt')
+
+    # Configure XML plugin based on arguments
+    xml_password_config = {}
+
+    if args.prod_only:
+        xml_password_config = {
+            'include_entities': ['prod_.*', 'production_.*', 'live_.*'],
+            'exclude_entities': ['test_.*', 'dev_.*', 'development_.*', 'example_.*', 'sample_.*', 'demo_.*'],
+            'min_password_length': 6
+        }
+    else:
+        if args.include_entities:
+            xml_password_config['include_entities'] = args.include_entities
+        if args.exclude_entities:
+            xml_password_config['exclude_entities'] = args.exclude_entities
+        if args.include_attributes:
+            xml_password_config['include_attributes'] = args.include_attributes
+        if args.exclude_attributes:
+            xml_password_config['exclude_attributes'] = args.exclude_attributes
+        xml_password_config['min_password_length'] = args.min_length
+
+    # Add custom ignore values if provided
+    if args.ignore_values:
+        xml_password_config['ignore_values'] = args.ignore_values
+
+    # Create plugin manager
+    plugin_manager = PluginManager(
+        enabled_plugins=enabled_plugins,
+        disabled_plugins=disabled_plugins,
+        xml_password_config=xml_password_config
+    )
 
     # Check if path is file or directory
     input_path = Path(args.path)
     if input_path.is_file():
         # Scan single file
         print(f"Scanning file: {args.path}")
+        print(f"Enabled plugins: {', '.join(plugin_manager.get_enabled_plugins())}")
         print(f"Normalization: {'enabled' if not args.no_normalize else 'disabled'}")
         print()
-        results = scan_xml_file(str(input_path), xml_plugin, unix_plugin, normalize=not args.no_normalize)
+        results = scan_xml_file(str(input_path), plugin_manager, normalize=not args.no_normalize)
         print(f"Found {len(results)} secret(s)")
     else:
         # Scan directory
         results = scan_directory(
             args.path,
-            xml_plugin,
-            unix_plugin,
+            plugin_manager,
             extensions=args.extensions,
             normalize=not args.no_normalize
         )
@@ -542,6 +569,7 @@ Examples:
     # Generate output
     output = {
         'scan_path': args.path,
+        'enabled_plugins': plugin_manager.get_enabled_plugins(),
         'normalization_enabled': not args.no_normalize,
         'total_secrets_found': len(results),
         'secrets': results
@@ -560,7 +588,7 @@ Examples:
 
     # Summary
     print(f"\n{'='*80}")
-    print(f"Summary: Found {len(results)} secrets")
+    print(f"Summary: Found {len(results)} secrets using {plugin_manager.get_plugin_count()} plugins")
     print(f"{'='*80}")
 
     # Exit with error code if secrets found

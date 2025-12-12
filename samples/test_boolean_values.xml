@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <!-- These should be ignored (boolean/config values) -->
+    <enabled>true</enabled>
+    <debug>false</debug>
+    <use_ssl>true</use_ssl>
+    <password>null</password>
+    <api_key>undefined</api_key>
+    <setting>yes</setting>
+    <feature_flag>on</feature_flag>
+    <status>enabled</status>
+
+    <!-- These should be detected (real secrets) -->
+    <password>MyRealPassword123!</password>
+    <api_key>REAL_API_KEY_abc123xyz</api_key>
+    <secret>ProductionSecret2024</secret>
+</configuration>

@@ -37,6 +37,7 @@ class XMLPasswordPlugin(RegexBasedDetector):
         exclude_attributes: Optional[List[str]] = None,
         min_password_length: int = 4,
         detect_empty: bool = False,
+        ignore_values: Optional[List[str]] = None,
         **kwargs
     ):
         super().__init__(**kwargs)
@@ -81,13 +82,27 @@ class XMLPasswordPlugin(RegexBasedDetector):
             'keystorePassword', 'keystore_password',
         ]
 
-        # Placeholder values to ignore
-        self.placeholder_values = {
+        # Placeholder values to ignore (default list)
+        default_placeholder_values = {
+            # Common placeholders
             'password', 'changeme', 'example', 'test', 'sample',
             'placeholder', 'xxx', '****', 'your_password_here',
             'enter_password', 'your_password', 'insert_password',
             'admin', '123456', 'qwerty', 'letmein',
+            # Boolean and null values
+            'true', 'false', 'null', 'none', 'nil', 'undefined',
+            # Common configuration values
+            'enabled', 'disabled', 'yes', 'no', 'on', 'off',
+            # Common default values
+            'default', 'empty', 'blank', 'n/a', 'na', 'tbd',
+            # Single characters or very short
+            'x', 'y', 'z', 'a', 'b', 'c', '1', '0', '-1',
         }
+
+        # Merge with custom ignore values (convert to lowercase for case-insensitive matching)
+        self.placeholder_values = default_placeholder_values.copy()
+        if ignore_values:
+            self.placeholder_values.update(v.lower() for v in ignore_values)
 
     @property
     def denylist(self) -> List[re.Pattern]:

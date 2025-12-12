@@ -1,22 +1,44 @@
 # xml-secrets-scanner
 
-Custom plugins for Yelp detect-secrets to detect XML passwords and Unix crypt hashes with flexible entity and attribute filtering.
+**Comprehensive secret detection tool** combining custom XML plugins with all detect-secrets built-in plugins for thorough repository scanning.
 
-## Why These Plugins?
+## What This Tool Detects
 
-Vanilla detect-secrets struggles with XML repositories because:
-- ❌ No XML-aware detection
-- ❌ Cannot detect Unix crypt format passwords
-- ❌ Turning up sensitivity creates excessive false positives
-- ❌ Limited filtering options for XML-specific patterns
+### 19 Plugin Types (Custom + Built-in)
 
-These plugins solve all of these issues:
+**Custom XML Plugins:**
 - ✅ XML-aware password detection in attributes and elements
 - ✅ Unix crypt hash detection (MD5, SHA-256, SHA-512, bcrypt)
 - ✅ Flexible include/exclude filtering by entity name (XML nodes)
 - ✅ Flexible include/exclude filtering by attribute name
+
+**Detect-Secrets Built-in Plugins:**
+- ✅ AWS Access Keys
+- ✅ Azure Storage Keys
+- ✅ Basic Auth credentials (user:pass@host)
+- ✅ Cloudant credentials
+- ✅ Discord bot tokens
+- ✅ GitLab tokens
+- ✅ IBM Cloud IAM keys
+- ✅ IBM COS HMAC credentials
+- ✅ Keyword-based secrets (password=, api_key=, etc.)
+- ✅ Mailchimp API keys
+- ✅ NPM tokens
+- ✅ OpenAI API keys
+- ✅ Private keys (RSA/SSH)
+- ✅ PyPI tokens
+- ✅ SendGrid API keys
+- ✅ Stripe API keys
+- ✅ Telegram bot tokens
+
+**Additional Features:**
 - ✅ Automatic placeholder detection
+- ✅ Ignores boolean/null values (true, false, null, enabled, etc.)
+- ✅ Custom ignore values via `--ignore-values`
+- ✅ High-entropy password detection
+- ✅ Multi-line XML support
 - ✅ Shows actual detected secrets for verification
+- ✅ Flexible plugin enable/disable control
 
 ## Quick Start
 
@@ -27,17 +49,29 @@ pip install -e .
 # Test
 python3 test_plugins.py
 
-# Scan a repository (with multi-line XML support)
+# List all available plugins
+python3 scan_with_plugins.py --list-plugins
+
+# Scan with ALL plugins (19 types of secrets)
 python3 scan_xml_with_context.py /path/to/repo --output results.json
 
-# Scan production secrets only
+# Scan production secrets only (with all plugins)
 python3 scan_xml_with_context.py /path/to/repo --prod-only --output prod-secrets.json
 
-# Fast scan (line-based, single-line XML only)
+# Scan with only specific plugins
+python3 scan_with_plugins.py /path/to/repo --only xml_password,aws,private_key --output results.json
+
+# Disable noisy plugins
+python3 scan_with_plugins.py /path/to/repo --disable keyword,stripe --output results.json
+
+# Ignore specific false positive values
+python3 scan_with_plugins.py /path/to/repo --ignore-values "myapp" "localhost" --output results.json
+
+# Fast directory scan (line-based)
 python3 scan_with_plugins.py /path/to/repo --output results.json
 ```
 
-**Note:** Use `scan_xml_with_context.py` for comprehensive scanning that handles multi-line XML and includes parent element context. It attempts to parse as XML first for any file and falls back to safe line-by-line scanning if parsing fails. In directory mode, it scans `.xml`, `.config`, `.conf`, `.properties`, `.yaml`, `.yml`, `.ini`, `.cfg` by default. See [MULTILINE_XML_GUIDE.md](MULTILINE_XML_GUIDE.md) for details.
+**Note:** Use `scan_xml_with_context.py` for comprehensive scanning that handles multi-line XML and includes parent element context. It attempts to parse as XML first for any file and falls back to safe line-by-line scanning if parsing fails. Both scanners now use all 19 plugins by default. See [MULTILINE_XML_GUIDE.md](MULTILINE_XML_GUIDE.md) and [PLUGIN_INTEGRATION_SUMMARY.md](PLUGIN_INTEGRATION_SUMMARY.md) for details.
 
 ## Features
 
@@ -127,6 +161,54 @@ pip install -e .
 python3 test_plugins.py
 ```
 
+## Plugin Management
+
+### List Available Plugins
+
+```bash
+python3 scan_with_plugins.py --list-plugins
+```
+
+Output:
+```
+Available Plugins:
+================================================================================
+  [✓] xml_password         - Detect passwords in XML elements and attributes
+  [✓] unix_crypt           - Detect Unix crypt password hashes
+  [✓] aws                  - Detect AWS Access Keys
+  [✓] azure_storage        - Detect Azure Storage Keys
+  ... (19 total plugins)
+```
+
+### Enable Only Specific Plugins
+
+```bash
+# Scan for only AWS keys and private keys
+python3 scan_with_plugins.py /path/to/repo --only aws,private_key
+
+# Scan for only XML passwords (original behavior)
+python3 scan_with_plugins.py /path/to/repo --only xml_password,unix_crypt
+```
+
+### Disable Specific Plugins
+
+```bash
+# Disable keyword plugin (can be noisy)
+python3 scan_with_plugins.py /path/to/repo --disable keyword
+
+# Disable multiple plugins
+python3 scan_with_plugins.py /path/to/repo --disable stripe,discord,telegram,keyword
+```
+
+### Plugin Control with Context Scanner
+
+Both scanners support the same plugin control options:
+
+```bash
+# scan_xml_with_context.py also supports --only and --disable
+python3 scan_xml_with_context.py /path/to/repo --only xml_password,aws,openai --output results.json
+```
+
 ## Usage
 
 ### Method 1: Use the Scan Script (Easiest)
@@ -210,12 +292,20 @@ XMLPasswordPlugin(
 
 ## Output Format
 
-The scan script produces JSON with detected secrets:
+The scan script produces JSON with detected secrets and plugin information:
 
 ```json
 {
   "scan_directory": "/path/to/repo",
-  "total_secrets_found": 2,
+  "enabled_plugins": [
+    "xml_password",
+    "unix_crypt",
+    "aws",
+    "private_key",
+    "keyword",
+    "..."
+  ],
+  "total_secrets_found": 4,
   "secrets": [
     {
       "file": "config/database.xml",
@@ -230,9 +320,28 @@ The scan script produces JSON with detected secrets:
       "type": "Unix Crypt Hash",
       "secret": "$6$salt$hash...",
       "line_content": "<hash>$6$salt$hash...</hash>"
+    },
+    {
+      "file": "config/aws.properties",
+      "line_number": 8,
+      "type": "AWS Access Key",
+      "secret": "AKIAIOSFODNN7EXAMPLE",
+      "line_content": "aws_access_key=AKIAIOSFODNN7EXAMPLE"
+    },
+    {
+      "file": "deploy/id_rsa",
+      "line_number": 1,
+      "type": "Private Key",
+      "secret": "-----BEGIN RSA PRIVATE KEY-----",
+      "line_content": "-----BEGIN RSA PRIVATE KEY-----"
     }
   ]
 }
+```
+
+The summary shows which plugins were used:
+```
+Summary: Found 4 secrets using 19 plugins
 ```
 
 ## Common Use Cases
@@ -395,8 +504,12 @@ Expected output:
 ## Documentation
 
 - **This README** - Quick start and common usage
+- **IGNORE_VALUES_GUIDE.md** - How to ignore false positives (true, false, custom values)
+- **PLUGIN_INTEGRATION_SUMMARY.md** - Comprehensive plugin integration guide
 - **README_PLUGINS.md** - Detailed plugin documentation with all options
 - **DETECT_SECRETS_GUIDE.md** - Integration with detect-secrets CLI
+- **MULTILINE_XML_GUIDE.md** - Multi-line XML support guide
+- **DUAL_SCAN_DOCUMENTATION.md** - Dual scan approach details
 - **PROJECT_SUMMARY.md** - Complete project overview
 
 ## Requirements
