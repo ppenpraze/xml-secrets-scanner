@@ -39,7 +39,7 @@
 
     <!-- Case 7: Multiple lines with formatting -->
     <production_api_key>
-        pk_live_VeryLongProductionAPIKey
+        FAKE_PRODUCTION_KEY_VeryLongAPIKey
         ThatSpansMultipleLinesForReadability
     </production_api_key>
 </configuration>

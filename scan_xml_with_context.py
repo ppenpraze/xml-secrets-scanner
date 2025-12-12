@@ -140,11 +140,67 @@ def scan_xml_element(element, parent_path: str, xml_plugin: XMLPasswordPlugin,
     return results
 
 
+def scan_original_xml(file_path: str, xml_plugin: XMLPasswordPlugin,
+                      unix_plugin: UnixCryptPlugin) -> List[Dict[str, Any]]:
+    """
+    Line-based scan of original XML file (before normalization).
+
+    This captures line numbers from the original file.
+
+    Args:
+        file_path: Path to XML file
+        xml_plugin: XMLPasswordPlugin instance
+        unix_plugin: UnixCryptPlugin instance
+
+    Returns:
+        List of detected secrets with original line numbers
+    """
+    results = []
+
+    try:
+        content = read_text_safely(file_path)
+
+        for line_num, line in enumerate(content.splitlines(), 1):
+            # Check with XML password plugin
+            for secret in xml_plugin.analyze_line(str(file_path), line, line_num):
+                results.append({
+                    'file': str(file_path),
+                    'line_number': line_num,
+                    'type': secret.type,
+                    'secret': getattr(secret, 'secret_value', '***'),
+                    'line_content': line.strip(),
+                    'detection_method': 'original_scan'
+                })
+
+            # Check with Unix crypt plugin
+            if unix_plugin is not None:
+                for secret in unix_plugin.analyze_line(str(file_path), line, line_num):
+                    results.append({
+                        'file': str(file_path),
+                        'line_number': line_num,
+                        'type': secret.type,
+                        'secret': getattr(secret, 'secret_value', '***'),
+                        'line_content': line.strip(),
+                        'detection_method': 'original_scan'
+                    })
+
+    except Exception as e:
+        print(f"Error in original scan of {file_path}: {e}", file=sys.stderr)
+
+    return results
+
+
 def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
                   unix_plugin: UnixCryptPlugin, normalize: bool = True,
                   ns_recovery: bool = True) -> List[Dict[str, Any]]:
     """
-    Scan an XML file for secrets with full context.
+    Scan an XML file for secrets with full context using DUAL SCAN approach.
+
+    This function performs TWO scans:
+    1. Original scan: Line-based on original file (captures line numbers)
+    2. Normalized scan: XML-parsed on normalized file (captures element paths, multi-line secrets)
+
+    Results are merged and deduplicated.
 
     Args:
         file_path: Path to XML file
@@ -153,7 +209,7 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
         normalize: Whether to normalize XML first
 
     Returns:
-        List of detected secrets with context
+        List of detected secrets with both line numbers and element context
     """
     def _line_fallback(raw_text: str) -> List[Dict[str, Any]]:
         # Perform a line-based scan so we still catch visible secrets
@@ -193,37 +249,152 @@ def scan_xml_file(file_path: str, xml_plugin: XMLPasswordPlugin,
         s = _re.sub(r'([\s<])([A-Za-z_][\w\.-]*):([A-Za-z_][\w\.-]*)=', r'\1\3=', s)
         return s
 
+    def _find_secret_line_in_original(secret_value: str, original_content: str,
+                                       element_tag: str = None) -> Optional[int]:
+        """
+        Search for a secret in the original file and return its line number.
+
+        Args:
+            secret_value: The secret to search for
+            original_content: Original file content
+            element_tag: Optional element tag to help narrow search (e.g., "password")
+
+        Returns:
+            Line number where secret appears, or None if not found
+        """
+        # Normalize the secret value (remove extra whitespace for multi-line secrets)
+        search_value = ' '.join(secret_value.split())
+
+        for line_num, line in enumerate(original_content.splitlines(), 1):
+            # Normalize line for comparison
+            normalized_line = ' '.join(line.split())
+
+            # Check if secret appears in this line
+            if search_value in normalized_line:
+                return line_num
+
+            # Also check if the secret spans multiple lines starting from this line
+            # (for multi-line secrets that were normalized)
+            if element_tag and f'<{element_tag}' in line:
+                # This might be the start of the element containing the secret
+                return line_num
+
+        return None
+
+    def _merge_results(original_results: List[Dict[str, Any]],
+                       normalized_results: List[Dict[str, Any]],
+                       original_content: str) -> List[Dict[str, Any]]:
+        """
+        Merge results from original and normalized scans, deduplicating.
+
+        Strategy:
+        - Original results have line numbers but may miss multi-line secrets
+        - Normalized results have element paths and catch multi-line secrets
+        - Merge by matching on (file, secret, type)
+        - Prefer original results (they have line numbers)
+        - Add normalized results that weren't found in original
+        - For normalized-only results, try to find line number by searching original
+
+        Args:
+            original_results: Results from original scan
+            normalized_results: Results from normalized scan
+            original_content: Original file content (for line lookup)
+
+        Returns:
+            Merged and deduplicated results
+        """
+        merged = []
+        seen_secrets = {}  # Key: (file, secret, type) -> result with best info
+
+        # First pass: Add all original results (they have line numbers)
+        for result in original_results:
+            key = (result['file'], result['secret'], result['type'])
+            seen_secrets[key] = result
+            merged.append(result)
+
+        # Second pass: Add normalized results, enriching or adding new ones
+        for norm_result in normalized_results:
+            key = (norm_result['file'], norm_result['secret'], norm_result['type'])
+
+            if key in seen_secrets:
+                # Secret was found in original scan - enrich with element path
+                orig_result = seen_secrets[key]
+                if 'element_path' in norm_result and 'element_path' not in orig_result:
+                    orig_result['element_path'] = norm_result['element_path']
+                if 'parent_element' in norm_result and 'parent_element' not in orig_result:
+                    orig_result['parent_element'] = norm_result['parent_element']
+                if 'attribute_name' in norm_result and 'attribute_name' not in orig_result:
+                    orig_result['attribute_name'] = norm_result['attribute_name']
+                # Mark that it was found in both scans
+                orig_result['detection_method'] = 'dual_scan'
+            else:
+                # New secret found only in normalized scan (multi-line secret)
+                # Try to find its line number in the original file
+                element_tag = norm_result.get('parent_element')
+                line_num = _find_secret_line_in_original(
+                    norm_result['secret'],
+                    original_content,
+                    element_tag
+                )
+
+                if line_num:
+                    norm_result['line_number'] = line_num
+                    norm_result['detection_method'] = 'normalized_scan_with_lookup'
+                else:
+                    norm_result['detection_method'] = 'normalized_scan_only'
+
+                merged.append(norm_result)
+                seen_secrets[key] = norm_result
+
+        return merged
+
+    # DUAL SCAN APPROACH
     try:
-        # Read XML content with robust encoding handling
+        # Read original content once (needed for both scans and line lookup)
         original_content = read_text_safely(file_path)
 
-        # Normalize if requested (gracefully degrades to original on parse errors inside)
-        xml_content = normalize_xml_content(original_content) if normalize else original_content
+        # SCAN 1: Original file (line-based) - captures line numbers
+        original_results = scan_original_xml(file_path, xml_plugin, unix_plugin)
 
-        try:
-            # First attempt to parse
-            root = ET.fromstring(xml_content)
-        except ET.ParseError as e:
-            msg = str(e)
-            # Attempt namespace prefix recovery if specifically unbound prefixes
-            if ns_recovery and ('unbound prefix' in msg or 'undefined prefix' in msg):
+        # SCAN 2: Normalized file (XML-parsed) - captures element paths and multi-line secrets
+        normalized_results = []
+
+        if normalize:
+            try:
+                # Normalize XML
+                xml_content = normalize_xml_content(original_content)
+
                 try:
-                    recovered = _sanitize_unbound_prefixes(xml_content)
-                    root = ET.fromstring(recovered)
-                    xml_content = recovered
-                    print(f"Info: Applied namespace prefix recovery for {file_path}", file=sys.stderr)
-                except ET.ParseError:
-                    # If still failing, fall back to line-based scanning
-                    print(f"Warning: Namespace recovery failed for {file_path}; using line fallback", file=sys.stderr)
-                    return _line_fallback(original_content)
-            else:
-                # Non-namespace parse error: fall back to line scan
-                print(f"Warning: Parse error for {file_path}: {e}; using line fallback", file=sys.stderr)
-                return _line_fallback(original_content)
+                    # Parse normalized XML
+                    root = ET.fromstring(xml_content)
+                except ET.ParseError as e:
+                    msg = str(e)
+                    # Attempt namespace prefix recovery
+                    if ns_recovery and ('unbound prefix' in msg or 'undefined prefix' in msg):
+                        try:
+                            recovered = _sanitize_unbound_prefixes(xml_content)
+                            root = ET.fromstring(recovered)
+                            xml_content = recovered
+                            print(f"Info: Applied namespace prefix recovery for {file_path}", file=sys.stderr)
+                        except ET.ParseError:
+                            # If still failing, use only original scan results
+                            print(f"Warning: Namespace recovery failed for {file_path}; using original scan only", file=sys.stderr)
+                            return original_results
+                    else:
+                        # Non-namespace parse error: use only original scan
+                        print(f"Warning: Parse error for {file_path}: {e}; using original scan only", file=sys.stderr)
+                        return original_results
 
-        # Scan the XML tree
-        results = scan_xml_element(root, "", xml_plugin, unix_plugin, file_path)
-        return results
+                # Scan the normalized XML tree
+                normalized_results = scan_xml_element(root, "", xml_plugin, unix_plugin, file_path)
+
+            except Exception as e:
+                print(f"Error in normalized scan of {file_path}: {e}; using original scan only", file=sys.stderr)
+                return original_results
+
+        # Merge results from both scans (pass original content for line lookup)
+        merged_results = _merge_results(original_results, normalized_results, original_content)
+        return merged_results
 
     except Exception as e:
         print(f"Error scanning {file_path}: {e}", file=sys.stderr)

@@ -164,6 +164,77 @@ class XMLPasswordPlugin(RegexBasedDetector):
         if value.startswith('$') and len(value) > 1:
             return True
 
+        # Check for EXAMPLE_ prefix or suffix (common in test data)
+        value_upper = value.upper()
+        if value_upper.startswith('EXAMPLE_') or value_upper.endswith('_EXAMPLE') or 'EXAMPLE' in value_upper:
+            return True
+
+        return False
+
+    def _calculate_entropy(self, value: str) -> float:
+        """Calculate Shannon entropy of a string."""
+        if not value or len(value) < 2:
+            return 0.0
+
+        from collections import Counter
+        import math
+
+        # Count character frequencies
+        counts = Counter(value)
+        total = len(value)
+
+        # Calculate Shannon entropy
+        entropy = -sum((count/total) * math.log2(count/total) for count in counts.values())
+
+        return entropy
+
+    def _is_high_entropy(self, value: str, threshold: float = 3.5) -> bool:
+        """Check if a value has high entropy (likely a password/secret)."""
+        if len(value) < 8:
+            return False
+
+        entropy = self._calculate_entropy(value)
+
+        # Adjust threshold based on length
+        # Longer strings naturally have higher entropy
+        if len(value) >= 20:
+            adjusted_threshold = threshold + 0.5
+        else:
+            adjusted_threshold = threshold
+
+        return entropy >= adjusted_threshold
+
+    def _element_name_contains_pattern(self, element_name: str) -> bool:
+        """Check if element name contains any default secret pattern (substring match)."""
+        elem_lower = element_name.lower()
+
+        # Check if any pattern is a substring of the element name
+        for pattern in self.default_element_patterns:
+            if pattern.lower() in elem_lower:
+                return True
+
+        return False
+
+    def _attribute_name_contains_pattern(self, attribute_name: str) -> bool:
+        """Check if attribute name contains any default secret pattern (substring match)."""
+        attr_lower = attribute_name.lower()
+
+        # Check if any pattern is a substring of the attribute name
+        for pattern in self.default_attribute_patterns:
+            if pattern.lower() in attr_lower:
+                return True
+
+        return False
+
+    def _matches_any_pattern(self, name: str, patterns: List[re.Pattern]) -> bool:
+        """Check if name matches any of the provided regex patterns."""
+        if not patterns:
+            return False
+
+        for pattern in patterns:
+            if pattern.search(name):
+                return True
+
         return False
 
     def _looks_like_base64(self, s: str) -> bool:
@@ -233,29 +304,25 @@ class XMLPasswordPlugin(RegexBasedDetector):
             element_name = match.group(1)
             element_value = match.group(2).strip()
 
-            # Check against default element patterns or custom patterns
-            should_check = False
+            # STEP 1: Determine if this is potentially a secret-like element
+            # Check if element name contains any default patterns (substring match)
+            matches_default = self._element_name_contains_pattern(element_name)
 
-            # Check include/exclude entity patterns
-            if not self._should_include_entity(element_name):
+            # Check if element matches custom include patterns (regex match)
+            matches_include = self._matches_any_pattern(element_name, self.include_entity_patterns)
+
+            # If neither default nor include patterns match, skip
+            if not matches_default and not matches_include:
                 continue
 
-            # Check if element name matches default secret patterns
-            if element_name.lower() in self.default_element_patterns:
-                should_check = True
-
-            # Check custom include patterns
-            if self.include_entity_patterns:
-                for pattern in self.include_entity_patterns:
-                    if pattern.search(element_name):
-                        should_check = True
-                        break
-
-            if not should_check:
+            # STEP 2: Check if explicitly excluded
+            if self._matches_any_pattern(element_name, self.exclude_entity_patterns):
                 continue
 
-            # Validate the value
-            if not self._is_valid_secret(element_value):
+            # STEP 3: Validate the value
+            # For password-like fields, use high-entropy detection
+            is_password_field = matches_default or matches_include
+            if not self._is_valid_secret(element_value, is_password_field):
                 continue
 
             yield PotentialSecret(
@@ -299,17 +366,32 @@ class XMLPasswordPlugin(RegexBasedDetector):
                 line_number=line_number,
             )
 
-    def _is_valid_secret(self, value: str) -> bool:
-        """Check if a value is a valid secret."""
+    def _is_valid_secret(self, value: str, is_password_field: bool = False) -> bool:
+        """Check if a value is a valid secret.
+
+        Args:
+            value: The value to validate
+            is_password_field: True if this is a password/secret field (enables entropy check)
+        """
         if not value:
             return self.detect_empty
 
-        # Check minimum length
-        if len(value) < self.min_password_length:
+        # Check if it's a placeholder first (before length check)
+        if self._is_placeholder(value):
             return False
 
-        # Check if it's a placeholder
-        if self._is_placeholder(value):
+        # For password fields with reasonable length, check entropy
+        if is_password_field and len(value) >= 8:
+            # High entropy values are likely real secrets
+            if self._is_high_entropy(value):
+                return True
+            # For password fields, also accept longer values even without high entropy
+            # (e.g., passphrases like "correct horse battery staple")
+            if len(value) >= 12:
+                return True
+
+        # Check minimum length
+        if len(value) < self.min_password_length:
             return False
 
         return True
@@ -340,13 +422,13 @@ class UnixCryptPlugin(RegexBasedDetector):
 
     def __init__(
         self,
-        detect_des: bool = False,
+        detect_des: bool = False,  # Disabled by default due to high false positive rate
         detect_md5: bool = True,
         detect_bcrypt: bool = True,
         detect_sha256: bool = True,
         detect_sha512: bool = True,
         detect_yescrypt: bool = True,
-        require_des_context: bool = True,
+        require_des_context: bool = True,  # If DES enabled, require context words
         **kwargs
     ):
         self.detect_des = detect_des
