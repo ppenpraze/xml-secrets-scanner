@@ -138,17 +138,21 @@ class XMLPasswordPlugin(RegexBasedDetector):
         ]
 
         # Placeholder values to ignore (default list)
+        # IMPORTANT: Do NOT add actual weak passwords here (like 'password', 'admin', '123456')
+        # Those MUST be detected as security risks, not filtered!
         default_placeholder_values = {
-            # Common placeholders
-            'example', 'test', 'sample',
-            'placeholder', 'xxx', '****',
-            # Boolean and null values
+            # Template/Documentation placeholders only
+            'placeholder', 'example', 'test', 'sample',
+            'xxx', '****', '***', 'redacted',
+            'your_password_here', 'enter_password_here', 'insert_password_here',
+            'your_password', 'enter_password', 'insert_password',
+            # Boolean and null values (not passwords)
             'true', 'false', 'null', 'none', 'nil', 'undefined',
-            # Common configuration values
+            # Configuration values (not passwords)
             'enabled', 'disabled', 'yes', 'no', 'on', 'off',
-            # Common default values
+            # Meta/status values (not passwords)
             'default', 'empty', 'blank', 'n/a', 'na', 'tbd',
-            # Single characters or very short
+            # Single characters (too short to be meaningful)
             'x', 'y', 'z', 'a', 'b', 'c', '1', '0', '-1',
         }
 
