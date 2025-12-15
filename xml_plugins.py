@@ -342,13 +342,13 @@ class XMLPasswordPlugin(RegexBasedDetector):
         # Pattern 1: Key=Value pairs (SQL Server, PostgreSQL style)
         # Examples: Password=secret; Pwd=secret123; pwd=pass
         kv_patterns = [
-            r'(?i)password\s*=\s*([^;]+)',
-            r'(?i)pwd\s*=\s*([^;]+)',
-            r'(?i)passwd\s*=\s*([^;]+)',
+            re.compile(r'password\s*=\s*([^;]+)', re.IGNORECASE),
+            re.compile(r'pwd\s*=\s*([^;]+)', re.IGNORECASE),
+            re.compile(r'passwd\s*=\s*([^;]+)', re.IGNORECASE),
         ]
 
         for pattern in kv_patterns:
-            matches = re.finditer(pattern, conn_str)
+            matches = pattern.finditer(conn_str)
             for match in matches:
                 pwd = match.group(1).strip().strip('"\'')
                 if pwd:
@@ -370,12 +370,12 @@ class XMLPasswordPlugin(RegexBasedDetector):
 
         # Pattern 3: Query parameters (?password=secret or &password=secret)
         query_patterns = [
-            r'[?&](?i)password=([^&]+)',
-            r'[?&](?i)pwd=([^&]+)',
+            re.compile(r'[?&]password=([^&]+)', re.IGNORECASE),
+            re.compile(r'[?&]pwd=([^&]+)', re.IGNORECASE),
         ]
 
         for pattern in query_patterns:
-            matches = re.finditer(pattern, conn_str)
+            matches = pattern.finditer(conn_str)
             for match in matches:
                 pwd = match.group(1).strip()
                 # URL decode
