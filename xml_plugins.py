@@ -53,22 +53,47 @@ class XMLPasswordPlugin(RegexBasedDetector):
 
         # Default patterns for common password-like attributes
         self.default_attribute_patterns = [
+            # Core password patterns
             'password', 'passwd', 'pwd', 'pass',
             'secret', 'api_key', 'apikey', 'api-key',
             'auth_token', 'authtoken', 'auth-token',
             'access_token', 'accesstoken', 'access-token',
             'private_key', 'privatekey', 'private-key',
             'client_secret', 'clientsecret', 'client-secret',
-            # encryption / AES related
+            # Encryption / AES related
             'aes_key', 'aeskey', 'aes-key',
             'encryption_key', 'encryptionkey', 'encryption-key',
             'crypto_key', 'cryptokey', 'crypto-key',
             'cipher_key', 'cipherkey', 'cipher-key',
             'keystore_password', 'keystore_pass', 'keystorepass',
+            # Generic secret patterns
+            'token', 'credential', 'credentials', 'key', 'hash',
+            # OAuth/JWT patterns
+            'oauth', 'bearer', 'jwt', 'refresh',
+            'oauth_token', 'bearer_token', 'jwt_token', 'refresh_token',
+            # Database patterns
+            'dsn', 'jdbc', 'jdbc_url', 'connection_url',
+            'db_password', 'db_passwd', 'db_pass', 'database_password',
+            # Cloud provider patterns
+            'account_key', 'access_key_id', 'secret_access_key', 'session_token',
+            # Certificate/SSL patterns
+            'certificate', 'cert', 'pkcs', 'pkcs12',
+            'cert_password', 'certificate_password', 'pkcs12_password',
+            'keystore_key', 'truststore_password', 'truststore_pass',
+            # Service-specific patterns
+            'api_secret', 'master_key', 'service_key', 'webhook_secret',
+            # ITRS Geneos / Generic variable patterns (for obfuscated passwords)
+            'var', 'variable', 'value', 'data', 'config', 'setting',
+            'auth', 'authentication', 'authorization', 'login',
+            'user_pass', 'userpass', 'user_password', 'account_password',
+            # SNMP and monitoring-specific (ITRS Geneos uses SNMP)
+            'community', 'community_string', 'snmp_community', 'snmpCommunity',
+            'snmp', 'trap', 'trapCommunity', 'trap_community',
         ]
 
         # Default patterns for common secret-like elements
         self.default_element_patterns = [
+            # Core password patterns
             'password', 'passwd', 'pwd', 'pass',
             'secret', 'apiKey', 'api_key', 'api-key',
             'authToken', 'auth_token', 'auth-token',
@@ -76,19 +101,47 @@ class XMLPasswordPlugin(RegexBasedDetector):
             'privateKey', 'private_key', 'private-key',
             'clientSecret', 'client_secret', 'client-secret',
             'connectionString', 'connection_string', 'connection-string',
-            # encryption / AES related
+            # Encryption / AES related
             'aesKey', 'aes_key', 'encryptionKey', 'encryption_key',
             'cryptoKey', 'crypto_key', 'cipherKey', 'cipher_key',
             'keystorePassword', 'keystore_password',
+            # Generic secret patterns
+            'token', 'credential', 'credentials', 'key', 'hash',
+            # OAuth/JWT patterns
+            'oauth', 'bearer', 'jwt', 'refresh',
+            'oauthToken', 'oauth_token', 'bearerToken', 'bearer_token',
+            'jwtToken', 'jwt_token', 'refreshToken', 'refresh_token',
+            # Database patterns
+            'dsn', 'jdbc', 'jdbcUrl', 'jdbc_url',
+            'connectionUrl', 'connection_url',
+            'dbPassword', 'db_password', 'db_passwd', 'databasePassword',
+            # Cloud provider patterns
+            'accountKey', 'account_key', 'accessKeyId', 'access_key_id',
+            'secretAccessKey', 'secret_access_key',
+            'sessionToken', 'session_token',
+            # Certificate/SSL patterns
+            'certificate', 'cert', 'pkcs', 'pkcs12',
+            'certificatePassword', 'certificate_password',
+            'keystoreKey', 'keystore_key', 'truststorePassword', 'truststore_password',
+            # Service-specific patterns
+            'apiSecret', 'api_secret', 'masterKey', 'master_key',
+            'serviceKey', 'service_key', 'webhookSecret', 'webhook_secret',
+            # ITRS Geneos / Generic variable patterns (for obfuscated passwords)
+            'var', 'variable', 'value', 'data', 'config', 'setting',
+            'auth', 'authentication', 'authorization', 'login',
+            'userPass', 'user_pass', 'userPassword', 'user_password',
+            'accountPassword', 'account_password', 'encoded', 'encoded64',
+            # SNMP and monitoring-specific (ITRS Geneos uses SNMP)
+            'community', 'communityString', 'community_string',
+            'snmpCommunity', 'snmp_community', 'snmp',
+            'trap', 'trapCommunity', 'trap_community',
         ]
 
         # Placeholder values to ignore (default list)
         default_placeholder_values = {
             # Common placeholders
-            'password', 'changeme', 'example', 'test', 'sample',
-            'placeholder', 'xxx', '****', 'your_password_here',
-            'enter_password', 'your_password', 'insert_password',
-            'admin', '123456', 'qwerty', 'letmein',
+            'example', 'test', 'sample',
+            'placeholder', 'xxx', '****',
             # Boolean and null values
             'true', 'false', 'null', 'none', 'nil', 'undefined',
             # Common configuration values
@@ -272,6 +325,63 @@ class XMLPasswordPlugin(RegexBasedDetector):
             return True
         return False
 
+    def _extract_credentials_from_connection_string(self, conn_str: str) -> Generator[str, None, None]:
+        """Extract embedded credentials from connection strings.
+
+        Supports formats:
+        - Key=Value pairs: Password=secret; Pwd=secret
+        - URL format: protocol://user:password@host
+        - JDBC parameters: ?user=admin&password=secret
+        """
+        import urllib.parse
+
+        # Pattern 1: Key=Value pairs (SQL Server, PostgreSQL style)
+        # Examples: Password=secret; Pwd=secret123; pwd=pass
+        kv_patterns = [
+            r'(?i)password\s*=\s*([^;]+)',
+            r'(?i)pwd\s*=\s*([^;]+)',
+            r'(?i)passwd\s*=\s*([^;]+)',
+        ]
+
+        for pattern in kv_patterns:
+            matches = re.finditer(pattern, conn_str)
+            for match in matches:
+                pwd = match.group(1).strip().strip('"\'')
+                if pwd:
+                    yield pwd
+
+        # Pattern 2: URL format (protocol://user:password@host)
+        # Examples: postgresql://admin:secret@localhost/db
+        url_pattern = r'://(?:[^:/@]+):([^@]+)@'
+        matches = re.finditer(url_pattern, conn_str)
+        for match in matches:
+            pwd = match.group(1).strip()
+            # URL decode in case it's encoded
+            try:
+                pwd = urllib.parse.unquote(pwd)
+            except:
+                pass
+            if pwd:
+                yield pwd
+
+        # Pattern 3: Query parameters (?password=secret or &password=secret)
+        query_patterns = [
+            r'[?&](?i)password=([^&]+)',
+            r'[?&](?i)pwd=([^&]+)',
+        ]
+
+        for pattern in query_patterns:
+            matches = re.finditer(pattern, conn_str)
+            for match in matches:
+                pwd = match.group(1).strip()
+                # URL decode
+                try:
+                    pwd = urllib.parse.unquote(pwd)
+                except:
+                    pass
+                if pwd:
+                    yield pwd
+
     def analyze_line(
         self,
         filename: str,
@@ -334,7 +444,22 @@ class XMLPasswordPlugin(RegexBasedDetector):
             if self._matches_any_pattern(element_name, self.exclude_entity_patterns):
                 continue
 
-            # STEP 3: Validate the value
+            # STEP 3: Special handling for connection strings
+            # Extract embedded passwords from connection strings
+            elem_lower = element_name.lower()
+            if any(conn_word in elem_lower for conn_word in
+                   ['connection', 'connectionstring', 'jdbc', 'url', 'dsn']):
+                for embedded_pwd in self._extract_credentials_from_connection_string(element_value):
+                    if self._is_valid_secret(embedded_pwd, True):
+                        yield PotentialSecret(
+                            type='Connection String Password',
+                            filename=filename,
+                            secret=embedded_pwd,
+                            line_number=line_number,
+                        )
+                # Continue to also check the whole connection string as a secret
+
+            # STEP 4: Validate the value
             # For password-like fields, use high-entropy detection
             is_password_field = matches_default or matches_include
             if not self._is_valid_secret(element_value, is_password_field):
